@@ -28,7 +28,7 @@ fn main() {
                     println!("op: \n{}", resp);
                     _stream.write(resp.as_bytes()).unwrap();
                 } else {
-                    _stream.write(b"HTTP/1.1 404 Not Found\r\n\r\n").unwrap();
+                    _stream.write(b"HTTP/1.1 200 OK\r\n\r\n").unwrap();
                 }
             }
             Err(e) => {
