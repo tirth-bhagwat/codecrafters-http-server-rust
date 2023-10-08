@@ -86,7 +86,7 @@ fn get_request_type(request: &str) -> RequestType {
     }
 
 
-    let path = parts[1].split("/").take(2).collect_vec();
+    let path = parts[1].split("/").collect_vec();
     return match path[1] {
         "" => { RequestType::Blank }
         "echo" => { RequestType::Echo(path[2..].join("/").to_string()) }
