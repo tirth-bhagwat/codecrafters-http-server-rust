@@ -32,17 +32,6 @@ fn main() {
                     }
                     RequestType::Echo(str) => {
                         respond_with_msg(&str, &mut _stream).unwrap();
-                        // let resp = format!(
-                        //     "HTTP/1.1 200 OK\r\n\
-                        //     Content-Type: text/plain\r\n\
-                        //     Content-Length: {}\r\n\
-                        //     \r\n\
-                        //     {}\r\n",
-                        //     str.len().to_string(),
-                        //     str
-                        // );
-                        // println!("str: {}", resp);
-                        // _stream.write(resp.as_bytes()).unwrap();
                     }
                     RequestType::UserAgent => {
                         let headers: String = String::from_utf8(data)
@@ -50,12 +39,17 @@ fn main() {
                             .split("\r\n")
                             .into_iter()
                             .skip(1)
-                            .filter(|x| x.starts_with("User-Agent: "))
-                            .map(|x| x.replace("User-Agent: ", ""))
+                            .filter_map(
+                                |x| {
+                                    if x.starts_with("User-Agent: ") {
+                                        return Some(x.replace("User-Agent: ", ""));
+                                    }
+                                    return None;
+                                }
+                            )
                             .collect();
-                        println!("headers: {:?}", headers);
+
                         respond_with_msg(&headers, &mut _stream).unwrap();
-                        // _stream.write(b"HTTP/1.1 202 Accepted\r\n\r\n").unwrap();
                     }
                     RequestType::Error => {
                         _stream.write(b"HTTP/1.1 404 Not Found\r\n\r\n").unwrap();
@@ -91,10 +85,8 @@ fn get_request_type(request: &str) -> RequestType {
         return RequestType::Error;
     }
 
-    println!("parts: {:?}", parts);
 
-    let path = parts[1].split("/").collect_vec();
-    println!("path: {:?}", path);
+    let path = parts[1].split("/").take(2).collect_vec();
     return match path[1] {
         "" => { RequestType::Blank }
         "echo" => { RequestType::Echo(path[2..].join("/").to_string()) }
