@@ -1,6 +1,16 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
 
+use itertools::Itertools;
+
+enum RequestType {
+    Blank,
+    Echo(String),
+    UserAgent,
+    Error,
+}
+
+
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
 
@@ -9,28 +19,47 @@ fn main() {
             Ok(mut _stream) => {
                 let mut data = vec![0; 512];
                 _stream.read(&mut data).unwrap();
-                let request: String = String::from_utf8(data)
+                let start_line: String = String::from_utf8(data.clone())
                     .unwrap()
                     .split("\r\n")
                     .into_iter()
                     .take(1)
                     .collect();
 
-                // println!("{}", request);
-                // println!("{:?}", request);
-                if request.starts_with("GET /echo/") && request.ends_with(" HTTP/1.1") {
-                    let req_len = request.len();
-                    let resp = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}\r\n",
-                        req_len - 19,
-                        request.get(10..req_len - 9).unwrap()
-                    );
-                    println!("op: \n{}", resp);
-                    _stream.write(resp.as_bytes()).unwrap();
-                } else if request == "GET / HTTP/1.1" {
-                    _stream.write(b"HTTP/1.1 200 OK\r\n\r\n").unwrap();
-                } else {
-                    _stream.write(b"HTTP/1.1 404 Not Found\r\n\r\n").unwrap();
+                match get_request_type(&start_line) {
+                    RequestType::Blank => {
+                        _stream.write(b"HTTP/1.1 200 OK\r\n\r\n").unwrap();
+                    }
+                    RequestType::Echo(str) => {
+                        respond_with_msg(&str, &mut _stream).unwrap();
+                        // let resp = format!(
+                        //     "HTTP/1.1 200 OK\r\n\
+                        //     Content-Type: text/plain\r\n\
+                        //     Content-Length: {}\r\n\
+                        //     \r\n\
+                        //     {}\r\n",
+                        //     str.len().to_string(),
+                        //     str
+                        // );
+                        // println!("str: {}", resp);
+                        // _stream.write(resp.as_bytes()).unwrap();
+                    }
+                    RequestType::UserAgent => {
+                        let headers: String = String::from_utf8(data)
+                            .unwrap()
+                            .split("\r\n")
+                            .into_iter()
+                            .skip(1)
+                            .filter(|x| x.starts_with("User-Agent: "))
+                            .map(|x| x.replace("User-Agent: ", ""))
+                            .collect();
+                        println!("headers: {:?}", headers);
+                        respond_with_msg(&headers, &mut _stream).unwrap();
+                        // _stream.write(b"HTTP/1.1 202 Accepted\r\n\r\n").unwrap();
+                    }
+                    RequestType::Error => {
+                        _stream.write(b"HTTP/1.1 404 Not Found\r\n\r\n").unwrap();
+                    }
                 }
             }
             Err(e) => {
@@ -38,4 +67,38 @@ fn main() {
             }
         }
     }
+}
+
+fn respond_with_msg(msg: &str, _stream: &mut dyn Write) -> Result<(), std::io::Error>
+{
+    let resp = format!(
+        "HTTP/1.1 200 OK\r\n\
+        Content-Type: text/plain\r\n\
+        Content-Length: {}\r\n\
+        \r\n\
+        {}\r\n",
+        msg.len(),
+        msg
+    );
+    _stream.write(resp.as_bytes())?;
+    Ok(())
+}
+
+
+fn get_request_type(request: &str) -> RequestType {
+    let parts: Vec<String> = request.split(" ").map(|x| x.to_string()).collect();
+    if parts[0] != "GET" || parts[2] != "HTTP/1.1" {
+        return RequestType::Error;
+    }
+
+    println!("parts: {:?}", parts);
+
+    let path = parts[1].split("/").collect_vec();
+    println!("path: {:?}", path);
+    return match path[1] {
+        "" => { RequestType::Blank }
+        "echo" => { RequestType::Echo(path[2..].join("/").to_string()) }
+        "user-agent" => { RequestType::UserAgent }
+        _ => { RequestType::Error }
+    };
 }
