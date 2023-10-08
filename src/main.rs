@@ -21,7 +21,7 @@ fn main() {
                 if request.starts_with("GET /echo/") && request.ends_with(" HTTP/1.1") {
                     let req_len = request.len();
                     let resp = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\n\r\r\n{}\r\n",
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}\r\n",
                         req_len - 19,
                         request.get(10..req_len - 9).unwrap()
                     );
@@ -31,7 +31,6 @@ fn main() {
                     _stream.write(b"HTTP/1.1 200 OK\r\n\r\n").unwrap();
                 } else {
                     _stream.write(b"HTTP/1.1 404 Not Found\r\n\r\n").unwrap();
-
                 }
             }
             Err(e) => {
