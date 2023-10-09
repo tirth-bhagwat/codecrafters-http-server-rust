@@ -1,6 +1,7 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::thread;
+use std::path::PathBuf;
+use std::{env, fs, thread};
 
 use itertools::Itertools;
 
@@ -9,16 +10,19 @@ enum RequestType {
     Echo(String),
     UserAgent,
     Error,
+    File(String),
 }
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
+    let args = env::args().collect_vec();
 
     for stream in listener.incoming() {
         match stream {
             Ok(mut _stream) => {
+                let args = args.clone();
                 thread::spawn(move || {
-                    process_stream(&mut _stream);
+                    process_stream(&mut _stream, args);
                 });
             }
             Err(e) => {
@@ -28,7 +32,12 @@ fn main() {
     }
 }
 
-pub fn process_stream(mut _stream: &mut TcpStream) {
+pub fn process_stream(mut _stream: &mut TcpStream, args: Vec<String>) {
+    let mut directory: Option<PathBuf> = None;
+    if args.len() > 2 && args[1] == "--directory" {
+        directory = Some(PathBuf::from(&args[2]));
+    }
+
     let mut data = vec![0; 512];
     _stream.read(&mut data).unwrap();
     let start_line: String = String::from_utf8(data.clone())
@@ -43,7 +52,7 @@ pub fn process_stream(mut _stream: &mut TcpStream) {
             _stream.write(b"HTTP/1.1 200 OK\r\n\r\n").unwrap();
         }
         RequestType::Echo(str) => {
-            respond_with_msg(&str, &mut _stream).unwrap();
+            respond_with_msg(&mut _stream, &str, "text/plain").unwrap();
         }
         RequestType::UserAgent => {
             let headers: String = String::from_utf8(data)
@@ -59,7 +68,24 @@ pub fn process_stream(mut _stream: &mut TcpStream) {
                 })
                 .collect();
 
-            respond_with_msg(&headers, &mut _stream).unwrap();
+            respond_with_msg(&mut _stream, &headers, "text/plain").unwrap();
+        }
+        RequestType::File(filename) => {
+            if let Some(mut dir) = directory {
+                dir.push(&filename);
+                if dir.exists() && dir.is_file() {
+                    let file_data = fs::read(dir).unwrap();
+                    respond_with_msg(
+                        _stream,
+                        String::from_utf8(file_data).unwrap().as_str(),
+                        "application/octet-stream"
+                    ).unwrap();
+                } else {
+                    _stream.write(b"HTTP/1.1 404 Not Found\r\n\r\n").unwrap();
+                }
+            } else {
+                _stream.write(b"HTTP/1.1 404 Not Found\r\n\r\n").unwrap();
+            }
         }
         RequestType::Error => {
             _stream.write(b"HTTP/1.1 404 Not Found\r\n\r\n").unwrap();
@@ -67,13 +93,18 @@ pub fn process_stream(mut _stream: &mut TcpStream) {
     }
 }
 
-fn respond_with_msg(msg: &str, _stream: &mut dyn Write) -> Result<(), std::io::Error> {
+fn respond_with_msg(
+    _stream: &mut dyn Write,
+    msg: &str,
+    content_type: &str,
+) -> Result<(), std::io::Error> {
     let resp = format!(
         "HTTP/1.1 200 OK\r\n\
-        Content-Type: text/plain\r\n\
+        Content-Type: {}\r\n\
         Content-Length: {}\r\n\
         \r\n\
         {}\r\n",
+        content_type,
         msg.len(),
         msg
     );
@@ -92,6 +123,7 @@ fn get_request_type(request: &str) -> RequestType {
         "" => RequestType::Blank,
         "echo" => RequestType::Echo(path[2..].join("/").to_string()),
         "user-agent" => RequestType::UserAgent,
+        "files" => RequestType::File(path[2..].join("/").to_string()),
         _ => RequestType::Error,
     };
 }
