@@ -10,7 +10,8 @@ enum RequestType {
     Echo(String),
     UserAgent,
     Error,
-    File(String),
+    ReadFile(String),
+    WriteFile(String),
 }
 
 fn main() {
@@ -38,8 +39,9 @@ pub fn process_stream(mut _stream: &mut TcpStream, args: Vec<String>) {
         directory = Some(PathBuf::from(&args[2]));
     }
 
-    let mut data = vec![0; 512];
+    let mut data = vec![0; 1024];
     _stream.read(&mut data).unwrap();
+
     let start_line: String = String::from_utf8(data.clone())
         .unwrap()
         .split("\r\n")
@@ -70,7 +72,7 @@ pub fn process_stream(mut _stream: &mut TcpStream, args: Vec<String>) {
 
             respond_with_msg(&mut _stream, &headers, "text/plain").unwrap();
         }
-        RequestType::File(filename) => {
+        RequestType::ReadFile(filename) => {
             if let Some(mut dir) = directory {
                 dir.push(&filename);
                 if dir.exists() && dir.is_file() {
@@ -78,8 +80,35 @@ pub fn process_stream(mut _stream: &mut TcpStream, args: Vec<String>) {
                     respond_with_msg(
                         _stream,
                         String::from_utf8(file_data).unwrap().as_str(),
-                        "application/octet-stream"
-                    ).unwrap();
+                        "application/octet-stream",
+                    )
+                    .unwrap();
+                } else {
+                    _stream.write(b"HTTP/1.1 404 Not Found\r\n\r\n").unwrap();
+                }
+            } else {
+                _stream.write(b"HTTP/1.1 404 Not Found\r\n\r\n").unwrap();
+            }
+        }
+        RequestType::WriteFile(filename) => {
+            if let Some(mut dir) = directory {
+                dir.push(&filename);
+                if !dir.exists() {
+                    if let Ok(to_write) = String::from_utf8(data) {
+                        fs::write(
+                            dir,
+                            to_write
+                                .split("\r\n\r\n")
+                                .skip(1)
+                                .next()
+                                .unwrap()
+                                .replace("\0", ""),
+                        )
+                        .unwrap();
+                        _stream.write(b"HTTP/1.1 201 Created\r\n\r\n").unwrap();
+                    } else {
+                        _stream.write(b"HTTP/1.1 404 Not Found\r\n\r\n").unwrap();
+                    }
                 } else {
                     _stream.write(b"HTTP/1.1 404 Not Found\r\n\r\n").unwrap();
                 }
@@ -114,16 +143,26 @@ fn respond_with_msg(
 
 fn get_request_type(request: &str) -> RequestType {
     let parts: Vec<String> = request.split(" ").map(|x| x.to_string()).collect();
-    if parts[0] != "GET" || parts[2] != "HTTP/1.1" {
+
+    if !((parts[0] == "GET" || parts[0] == "POST") && parts[2] == "HTTP/1.1") {
         return RequestType::Error;
     }
 
     let path = parts[1].split("/").collect_vec();
-    return match path[1] {
-        "" => RequestType::Blank,
-        "echo" => RequestType::Echo(path[2..].join("/").to_string()),
-        "user-agent" => RequestType::UserAgent,
-        "files" => RequestType::File(path[2..].join("/").to_string()),
+
+    return match parts[0].as_str() {
+        "GET" => match path[1] {
+            "" => RequestType::Blank,
+            "echo" => RequestType::Echo(path[2..].join("/").to_string()),
+            "user-agent" => RequestType::UserAgent,
+            "files" => RequestType::ReadFile(path[2..].join("/").to_string()),
+            _ => RequestType::Error,
+        },
+
+        "POST" => match path[1] {
+            "files" => RequestType::WriteFile(path[2..].join("/").to_string()),
+            _ => RequestType::Error,
+        },
         _ => RequestType::Error,
     };
 }
